@@ -83,6 +83,8 @@ private:
     std::vector<vk::UniqueImageView> m_SwapChainImageViews;
     vk::UniqueRenderPass m_RenderPass;
     vk::UniquePipelineLayout m_PipelineLayout;
+    vk::UniquePipeline m_GraphicsPipeline;
+    std::vector<vk::UniqueFramebuffer> m_SwapChainFramebuffers;
 
 public:
     void Run() {
@@ -125,6 +127,7 @@ private:
         CreateImageViews();
         CreateRenderPass();
         CreateGraphicsPipeline();
+        CreateFramebuffers();
     }
 
     void CreateInstance() {
@@ -292,7 +295,7 @@ private:
             }
         }
 
-        if (m_PhysicalDevice == VK_NULL_HANDLE) {
+        if (m_PhysicalDevice == vk::PhysicalDevice()) {
             throw std::runtime_error("Failed to find a suitable GPU!");
         }
     }
@@ -673,6 +676,8 @@ private:
             .blendConstants = vk::ArrayWrapper1D<float, 4Ui64>({ 0.0f, 0.0f, 0.0f, 0.0f }),
         };
 
+        /*
+        // not currently using
         vk::DynamicState dynamicStates[]{
             vk::DynamicState::eViewport,
             vk::DynamicState::eLineWidth
@@ -683,6 +688,7 @@ private:
             .dynamicStateCount = 2,
             .pDynamicStates = dynamicStates,
         };
+        */
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
             .sType = vk::StructureType::ePipelineLayoutCreateInfo,
@@ -700,8 +706,63 @@ private:
             throw std::runtime_error("Failed to create pipeline layout!");
         }
 
+        vk::GraphicsPipelineCreateInfo pipelineInfo{
+            .sType = vk::StructureType::eGraphicsPipelineCreateInfo,
+            .stageCount = 2,
+            .pStages = shaderStages,
+            .pVertexInputState = &vertexInputInfo,
+            .pInputAssemblyState = &inputAssemblyInfo,
+            .pViewportState = &viewportStateInfo,
+            .pRasterizationState = &rasterizerInfo,
+            .pMultisampleState = &multisamplingInfo,
+            .pDepthStencilState = nullptr,
+            .pColorBlendState = &colorBlendingInfo,
+            .pDynamicState = nullptr,
+            .layout = m_PipelineLayout.get(),
+            .renderPass = m_RenderPass.get(),
+            .subpass = 0,
+            .basePipelineHandle = nullptr,
+            .basePipelineIndex = -1,
+        };
+
+        auto [pipelineResult, graphicsPipeline] = m_Device->createGraphicsPipelineUnique(nullptr, pipelineInfo);
+
+        m_GraphicsPipeline = std::move(graphicsPipeline);
+
+        if (pipelineResult != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create graphics pipeline!");
+        }
+
         m_Device->destroyShaderModule(vertShaderModule);
         m_Device->destroyShaderModule(fragShaderModule);
+    }
+
+    void CreateFramebuffers() {
+        m_SwapChainFramebuffers.resize(m_SwapChainImageViews.size());
+
+        for (size_t i = 0; i < m_SwapChainImageViews.size(); i++) {
+            vk::ImageView attachments[] = {
+                m_SwapChainImageViews[i].get(),
+            };
+
+            vk::FramebufferCreateInfo framebufferInfo{
+                .sType = vk::StructureType::eFramebufferCreateInfo,
+                .renderPass = m_RenderPass.get(),
+                .attachmentCount = 1,
+                .pAttachments = attachments,
+                .width = m_SwapChainExtent.width,
+                .height = m_SwapChainExtent.height,
+                .layers = 1,
+            };
+
+            auto [result, framebuffer] = m_Device->createFramebufferUnique(framebufferInfo);
+
+            m_SwapChainFramebuffers[i] = std::move(framebuffer);
+
+            if (result != vk::Result::eSuccess) {
+                throw std::runtime_error("Failed to create framebuffer!");
+            }
+        }
     }
 
     void MainLoop() {
