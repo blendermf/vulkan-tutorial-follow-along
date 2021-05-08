@@ -81,6 +81,7 @@ private:
     vk::Format m_SwapChainImageFormat;
     vk::Extent2D m_SwapChainExtent;
     std::vector<vk::UniqueImageView> m_SwapChainImageViews;
+    vk::UniqueRenderPass m_RenderPass;
     vk::UniquePipelineLayout m_PipelineLayout;
 
 public:
@@ -122,6 +123,7 @@ private:
         CreateLogicalDevice();
         CreateSwapChain();
         CreateImageViews();
+        CreateRenderPass();
         CreateGraphicsPipeline();
     }
 
@@ -506,6 +508,46 @@ private:
             if (result != vk::Result::eSuccess) {
                 throw std::runtime_error("Failed to create image views!");
             }
+        }
+    }
+
+    void CreateRenderPass() {
+        vk::AttachmentDescription colorAttachment{
+            .format = m_SwapChainImageFormat,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = vk::ImageLayout::eUndefined,
+            .finalLayout = vk::ImageLayout::ePresentSrcKHR,
+        };
+
+        vk::AttachmentReference colorAttachmentRef{
+            .attachment = 0,
+            .layout = vk::ImageLayout::eColorAttachmentOptimal,
+        };
+
+        vk::SubpassDescription subpass{
+            .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colorAttachmentRef,
+        };
+
+        vk::RenderPassCreateInfo renderPassInfo{
+            .sType = vk::StructureType::eRenderPassCreateInfo,
+            .attachmentCount = 1,
+            .pAttachments = &colorAttachment,
+            .subpassCount = 1,
+            .pSubpasses = &subpass,
+        };
+
+        auto [result, renderPass] = m_Device->createRenderPassUnique(renderPassInfo);
+
+        m_RenderPass = std::move(renderPass);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create render pass!");
         }
     }
 
