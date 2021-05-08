@@ -85,6 +85,8 @@ private:
     vk::UniquePipelineLayout m_PipelineLayout;
     vk::UniquePipeline m_GraphicsPipeline;
     std::vector<vk::UniqueFramebuffer> m_SwapChainFramebuffers;
+    vk::UniqueCommandPool m_CommandPool;
+    std::vector<vk::UniqueCommandBuffer> m_CommandBuffers;
 
 public:
     void Run() {
@@ -128,6 +130,8 @@ private:
         CreateRenderPass();
         CreateGraphicsPipeline();
         CreateFramebuffers();
+        CreateCommandPool();
+        CreateCommandBuffers();
     }
 
     void CreateInstance() {
@@ -761,6 +765,80 @@ private:
 
             if (result != vk::Result::eSuccess) {
                 throw std::runtime_error("Failed to create framebuffer!");
+            }
+        }
+    }
+
+    void CreateCommandPool() {
+        QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(m_PhysicalDevice);
+
+        vk::CommandPoolCreateInfo poolInfo{
+            .sType = vk::StructureType::eCommandPoolCreateInfo,
+            .queueFamilyIndex = queueFamilyIndices.GraphicsFamily.value(),
+        };
+
+        auto [result, commandPool] = m_Device->createCommandPoolUnique(poolInfo);
+
+        m_CommandPool = std::move(commandPool);
+
+        if (result != vk::Result::eSuccess)
+        {
+            throw std::runtime_error("Failed to create command pool!");
+        }
+    }
+
+    void CreateCommandBuffers(){
+        vk::CommandBufferAllocateInfo allocInfo{
+            .sType = vk::StructureType::eCommandBufferAllocateInfo,
+            .commandPool = m_CommandPool.get(),
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = static_cast<uint32_t>(m_SwapChainFramebuffers.size()),
+        };
+
+        auto [allocResult, commandBuffers] = m_Device->allocateCommandBuffersUnique(allocInfo);
+
+        m_CommandBuffers = std::move(commandBuffers);
+
+        if (allocResult != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to allocate command buffers!");
+        }
+
+        for (size_t i = 0; i < m_CommandBuffers.size(); i++) {
+            vk::CommandBufferBeginInfo beginInfo{
+                .sType = vk::StructureType::eCommandBufferBeginInfo,
+                .pInheritanceInfo = nullptr,
+            };
+
+            if (m_CommandBuffers[i]->begin(beginInfo) != vk::Result::eSuccess) {
+                throw std::runtime_error("Failed to begin recording command buffer!");
+            }
+
+            vk::ClearValue clearValue{};
+            clearValue.color = vk::ClearColorValue(std::array<float,4>{ 0.0f, 0.0f, 0.0f, 1.0f });
+
+            vk::RenderPassBeginInfo renderPassInfo{
+                .sType = vk::StructureType::eRenderPassBeginInfo,
+                .renderPass = m_RenderPass.get(),
+                .framebuffer = m_SwapChainFramebuffers[i].get(),
+                .renderArea = {
+                    .offset = {0, 0},
+                    .extent = m_SwapChainExtent,
+                },
+                .clearValueCount = 1,
+                .pClearValues = &clearValue,
+            };
+
+            m_CommandBuffers[i]->beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+
+            m_CommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, m_GraphicsPipeline.get());
+
+            m_CommandBuffers[i]->draw(3, 1, 0, 0);
+
+            m_CommandBuffers[i]->endRenderPass();
+
+            if (m_CommandBuffers[i]->end() != vk::Result::eSuccess)
+            {
+                throw std::runtime_error("Failed to record command buffer!");
             }
         }
     }
