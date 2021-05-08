@@ -104,7 +104,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <CustomBuild Include="shaders\*.vert;shaders\*.frag;">
+    <None Include="shaders\shader.frag" />
+    <None Include="shaders\shader.vert" />
+    <_WildCardCustomBuild Include="shaders\*.vert;shaders\*.frag;">
       <Message>Compiling Shaders...</Message>
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%25VULKAN_SDK%25/Bin/glslc.exe %(Identity) -o $(OutDir)%(Identity).spv</Command>
@@ -117,8 +119,13 @@
       <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</BuildInParallel>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling Shader %(Identity)...</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling Shader %(Identity)...</Message>
-    </CustomBuild>
+    </_WildCardCustomBuild>
   </ItemGroup>
+  <Target Name="AddWildCardItems" AfterTargets="BuildGenerateSources">
+    <ItemGroup>
+      <CustomBuild Include="@(_WildCardCustomBuild)" />
+    </ItemGroup>
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\vcpkg.C.Users.blendermf.Documents.VulkanApp.vcpkg.1.0.0\build\native\vcpkg.C.Users.blendermf.Documents.VulkanApp.vcpkg.targets" Condition="Exists('..\packages\vcpkg.C.Users.blendermf.Documents.VulkanApp.vcpkg.1.0.0\build\native\vcpkg.C.Users.blendermf.Documents.VulkanApp.vcpkg.targets')" />
