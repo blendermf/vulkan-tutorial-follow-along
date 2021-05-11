@@ -4,6 +4,7 @@
 #define VULKAN_HPP_ASSERT 
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 
 #include <vector>
 #include <iostream>
@@ -49,6 +50,44 @@ struct SwapChainSupportDetails {
     vk::SurfaceCapabilitiesKHR Capabilities;
     std::vector<vk::SurfaceFormatKHR> Formats;
     std::vector<vk::PresentModeKHR> PresentModes;
+};
+
+struct Vertex {
+    glm::vec2 Position;
+    glm::vec3 Color;
+
+    static vk::VertexInputBindingDescription GetBindingDescription() {
+        vk::VertexInputBindingDescription bindingDescription{
+            .binding = 0,
+            .stride = sizeof(Vertex),
+            .inputRate = vk::VertexInputRate::eVertex,
+        };
+
+        return bindingDescription;
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 2> GetAttributeDescriptions() {
+        return std::array<vk::VertexInputAttributeDescription, 2>{
+            vk::VertexInputAttributeDescription{
+                .location = 0,
+                .binding = 0,
+                .format = vk::Format::eR32G32Sfloat,
+                .offset = offsetof(Vertex, Position),
+            },
+            vk::VertexInputAttributeDescription{
+                .location = 1,
+                .binding = 0,
+                .format = vk::Format::eR32G32B32Sfloat,
+                .offset = offsetof(Vertex, Color),
+            },
+        };
+    }
+};
+
+const std::vector<Vertex> s_Vertices = {
+    {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
 };
 
 class HelloTriangleApplication {
@@ -698,10 +737,15 @@ private:
 
         vk::PipelineShaderStageCreateInfo shaderStages[]{vertShaderStageInfo, fragShaderStageInfo};
 
+        auto bindingDescription = Vertex::GetBindingDescription();
+        auto attributeDescriptions = Vertex::GetAttributeDescriptions();
+
         vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
             .sType = vk::StructureType::ePipelineVertexInputStateCreateInfo,
-            .vertexBindingDescriptionCount = 0,
-            .vertexAttributeDescriptionCount = 0,
+            .vertexBindingDescriptionCount = 1,
+            .pVertexBindingDescriptions = &bindingDescription,
+            .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
+            .pVertexAttributeDescriptions = attributeDescriptions.data(),
         };
 
         vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo{

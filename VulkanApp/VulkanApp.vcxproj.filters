@@ -32,7 +32,6 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="shaders\shader.frag" />
     <CustomBuild Include="shaders\*.vert;shaders\*.frag;" />
   </ItemGroup>
 </Project>
