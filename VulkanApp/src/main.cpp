@@ -542,8 +542,6 @@ private:
     void CleanupSwapChain() {
         m_SwapChainFramebuffers.clear();
         m_CommandBuffers.clear();
-        m_GraphicsPipeline.release();
-        m_PipelineLayout.release();
         m_RenderPass.release();
         m_SwapChainImageViews.clear();
 
@@ -570,7 +568,6 @@ private:
         CreateSwapChain();
         CreateImageViews();
         CreateRenderPass();
-        CreateGraphicsPipeline();
         CreateFramebuffers();
         CreateCommandBuffers();
 
@@ -713,26 +710,12 @@ private:
             .primitiveRestartEnable = VK_FALSE,
         };
 
-        vk::Viewport viewport{
-            .x = 0.0f,
-            .y = 0.0f,
-            .width = (float)m_SwapChainExtent.width,
-            .height = (float)m_SwapChainExtent.height,
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-        };
-
-        vk::Rect2D scissor{
-            .offset = {0, 0},
-            .extent = m_SwapChainExtent,
-        };
-
         vk::PipelineViewportStateCreateInfo viewportStateInfo{
             .sType = vk::StructureType::ePipelineViewportStateCreateInfo,
             .viewportCount = 1,
-            .pViewports = &viewport,
+            .pViewports = nullptr, // Dynamic state, so null
             .scissorCount = 1,
-            .pScissors = &scissor,
+            .pScissors = nullptr, // Dynamic state, so null
         };
 
         vk::PipelineRasterizationStateCreateInfo rasterizerInfo{
@@ -773,11 +756,11 @@ private:
         colorBlendingInfo.blendConstants[2] = 0.0f;
         colorBlendingInfo.blendConstants[3] = 0.0f;
 
-        /*
-        // not currently using
+        
+
         vk::DynamicState dynamicStates[]{
             vk::DynamicState::eViewport,
-            vk::DynamicState::eLineWidth
+            vk::DynamicState::eScissor
         };
 
         vk::PipelineDynamicStateCreateInfo dynamicStateInfo{
@@ -785,7 +768,6 @@ private:
             .dynamicStateCount = 2,
             .pDynamicStates = dynamicStates,
         };
-        */
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
             .sType = vk::StructureType::ePipelineLayoutCreateInfo,
@@ -811,7 +793,7 @@ private:
             .pRasterizationState = &rasterizerInfo,
             .pMultisampleState = &multisamplingInfo,
             .pColorBlendState = &colorBlendingInfo,
-            //.pDynamicState = nullptr,
+            .pDynamicState = &dynamicStateInfo,
             .layout = m_PipelineLayout.get(),
             .renderPass = m_RenderPass.get(),
             .subpass = 0,
@@ -884,6 +866,20 @@ private:
             .commandBufferCount = static_cast<uint32_t>(m_SwapChainFramebuffers.size()),
         };
 
+        vk::Viewport viewport{
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = (float)m_SwapChainExtent.width,
+            .height = (float)m_SwapChainExtent.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+
+        vk::Rect2D scissor{
+            .offset = {0, 0},
+            .extent = m_SwapChainExtent,
+        };
+
         auto [allocResult, commandBuffers] = m_Device->allocateCommandBuffersUnique(allocInfo);
 
         m_CommandBuffers = std::move(commandBuffers);
@@ -915,6 +911,9 @@ private:
                 .clearValueCount = 1,
                 .pClearValues = &clearValue,
             };
+
+            m_CommandBuffers[i]->setViewport(0, 1, &viewport);
+            m_CommandBuffers[i]->setScissor(0, 1, &scissor);
 
             m_CommandBuffers[i]->beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
 
