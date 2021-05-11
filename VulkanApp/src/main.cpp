@@ -498,6 +498,8 @@ private:
 
         bool seperateQueueFamilies = indices.GraphicsFamily != indices.PresentFamily;
 
+        m_OldSwapChain = std::move(m_SwapChain);
+
         vk::SwapchainCreateInfoKHR createInfo{
             .sType = vk::StructureType::eSwapchainCreateInfoKHR,
             .surface = m_Surface.get(),
@@ -514,6 +516,7 @@ private:
             .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
             .presentMode = presentMode,
             .clipped = VK_TRUE,
+            .oldSwapchain = m_OldSwapChain.get(),
         };
 
         auto [result, swapChain] = m_Device->createSwapchainKHRUnique(createInfo);
@@ -545,8 +548,8 @@ private:
         m_SwapChainImageViews.clear();
 
         // Not sure why this is needed to prevent validation error / crashes, the next line calls the destroy function
-        m_Device->destroySwapchainKHR(m_SwapChain.get());
-        m_SwapChain.release();
+        m_Device->destroySwapchainKHR(m_OldSwapChain.get());
+        m_OldSwapChain.release();
     }
 
     void RecreateSwapChain() {
