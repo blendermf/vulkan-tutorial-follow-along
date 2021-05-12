@@ -120,6 +120,8 @@ private:
     std::vector<vk::Fence> m_InFlightFences;
     std::vector<vk::Fence> m_ImagesInFlight;
     size_t m_CurrentFrame = 0;
+    vk::UniqueBuffer m_VertexBuffer;
+    vk::UniqueDeviceMemory m_VertexBufferMemory;
 
 public:
     void Run() {
@@ -173,6 +175,7 @@ private:
         CreateGraphicsPipeline();
         CreateFramebuffers();
         CreateCommandPool();
+        CreateVertexBuffer();
         CreateCommandBuffers();
         CreateSyncObjects();
     }
@@ -902,6 +905,67 @@ private:
         }
     }
 
+    uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+        vk::PhysicalDeviceMemoryProperties memProperties = m_PhysicalDevice.getMemoryProperties();
+
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+            if ((typeFilter & (1 << i)) &&
+                (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+
+        throw std::runtime_error("Failed to find suitable memory type!");
+    }
+
+    void CreateVertexBuffer() {
+        vk::BufferCreateInfo bufferInfo{
+            .sType = vk::StructureType::eBufferCreateInfo,
+            .size = sizeof(s_Vertices[0]) * s_Vertices.size(),
+            .usage = vk::BufferUsageFlagBits::eVertexBuffer,
+            .sharingMode = vk::SharingMode::eExclusive,
+        };
+
+        auto [result, vertexBuffer] = m_Device->createBufferUnique(bufferInfo);
+
+        m_VertexBuffer = std::move(vertexBuffer);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create vertex buffer!");
+        }
+
+        vk::MemoryRequirements memRequirements = m_Device->getBufferMemoryRequirements(m_VertexBuffer.get());
+        
+        vk::MemoryAllocateInfo allocInfo{
+            .sType = vk::StructureType::eMemoryAllocateInfo,
+            .allocationSize = memRequirements.size,
+            .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits,
+                                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent),
+        };
+
+        {
+            auto [result, vertexBufferMemory] = m_Device->allocateMemoryUnique(allocInfo);
+
+            m_VertexBufferMemory = std::move(vertexBufferMemory);
+
+            if (result != vk::Result::eSuccess) {
+                throw std::runtime_error("Failed to allocate vertex buffer memory!");
+            }
+        }
+
+        if (m_Device->bindBufferMemory(m_VertexBuffer.get(), m_VertexBufferMemory.get(), 0) != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to bind buffer memory!");
+        }
+
+        void* data;
+        if (m_Device->mapMemory(m_VertexBufferMemory.get(), vk::DeviceSize(0), 
+            bufferInfo.size, vk::MemoryMapFlags(0), &data) != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to map memory!");
+        }
+        memcpy(data, s_Vertices.data(), (size_t)bufferInfo.size);
+        m_Device->unmapMemory(m_VertexBufferMemory.get());
+    }
+
     void CreateCommandBuffers(){
         vk::CommandBufferAllocateInfo allocInfo{
             .sType = vk::StructureType::eCommandBufferAllocateInfo,
@@ -963,7 +1027,11 @@ private:
 
             m_CommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eGraphics, m_GraphicsPipeline.get());
 
-            m_CommandBuffers[i]->draw(3, 1, 0, 0);
+            vk::Buffer vertexBuffers[] = { m_VertexBuffer.get() };
+            vk::DeviceSize offsets[] = { 0 };
+            m_CommandBuffers[i]->bindVertexBuffers(0, 1, vertexBuffers, offsets);
+
+            m_CommandBuffers[i]->draw(static_cast<uint32_t>(s_Vertices.size()), 1, 0, 0);
 
             m_CommandBuffers[i]->endRenderPass();
 
