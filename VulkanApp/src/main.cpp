@@ -918,52 +918,130 @@ private:
         throw std::runtime_error("Failed to find suitable memory type!");
     }
 
-    void CreateVertexBuffer() {
+    void CreateBufferUnique(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
+                        vk::UniqueBuffer& buffer, vk::UniqueDeviceMemory& bufferMemory) {
+        vk::Buffer localBuffer;
+        vk::DeviceMemory localBufferMemory;
+        CreateBuffer(size, usage, properties, localBuffer, localBufferMemory);
+
+        buffer = vk::UniqueBuffer(localBuffer, m_Device.get());
+        bufferMemory = vk::UniqueDeviceMemory(localBufferMemory, m_Device.get());
+    }
+
+    void CreateBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
+        vk::Buffer& buffer, vk::DeviceMemory& bufferMemory) {
         vk::BufferCreateInfo bufferInfo{
             .sType = vk::StructureType::eBufferCreateInfo,
-            .size = sizeof(s_Vertices[0]) * s_Vertices.size(),
-            .usage = vk::BufferUsageFlagBits::eVertexBuffer,
+            .size = size,
+            .usage = usage,
             .sharingMode = vk::SharingMode::eExclusive,
         };
 
-        auto [result, vertexBuffer] = m_Device->createBufferUnique(bufferInfo);
+        auto [result, localBuffer] = m_Device->createBuffer(bufferInfo);
 
-        m_VertexBuffer = std::move(vertexBuffer);
+        buffer = localBuffer;
 
         if (result != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to create vertex buffer!");
         }
 
-        vk::MemoryRequirements memRequirements = m_Device->getBufferMemoryRequirements(m_VertexBuffer.get());
-        
+        vk::MemoryRequirements memRequirements = m_Device->getBufferMemoryRequirements(buffer);
+
         vk::MemoryAllocateInfo allocInfo{
             .sType = vk::StructureType::eMemoryAllocateInfo,
             .allocationSize = memRequirements.size,
-            .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits,
-                                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent),
+            .memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties),
         };
 
         {
-            auto [result, vertexBufferMemory] = m_Device->allocateMemoryUnique(allocInfo);
+            auto [result, localBufferMemory] = m_Device->allocateMemory(allocInfo);
 
-            m_VertexBufferMemory = std::move(vertexBufferMemory);
+            bufferMemory = localBufferMemory;
 
             if (result != vk::Result::eSuccess) {
                 throw std::runtime_error("Failed to allocate vertex buffer memory!");
             }
         }
 
-        if (m_Device->bindBufferMemory(m_VertexBuffer.get(), m_VertexBufferMemory.get(), 0) != vk::Result::eSuccess) {
+        if (m_Device->bindBufferMemory(buffer, bufferMemory, 0) != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to bind buffer memory!");
         }
+    }
+
+    void CopyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
+        vk::CommandBufferAllocateInfo allocInfo{
+            .sType = vk::StructureType::eCommandBufferAllocateInfo,
+            .commandPool = m_CommandPool.get(),
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1,
+        };
+
+        auto [result, commandBuffers] = m_Device->allocateCommandBuffers(allocInfo);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to allocate command buffers!");
+        }
+
+        vk::CommandBufferBeginInfo beginInfo{
+            .sType = vk::StructureType::eCommandBufferBeginInfo,
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        };
+        if (commandBuffers[0].begin(beginInfo) != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to begin recording command buffer!");
+        }
+
+        vk::BufferCopy copyRegion{
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = size,
+        };
+        commandBuffers[0].copyBuffer(srcBuffer, dstBuffer, 1, &copyRegion);
+
+        if (commandBuffers[0].end() != vk::Result::eSuccess)
+        {
+            throw std::runtime_error("Failed to record command buffer!");
+        }
+
+        vk::SubmitInfo submitInfo{
+            .sType = vk::StructureType::eSubmitInfo,
+            .commandBufferCount = 1,
+            .pCommandBuffers = commandBuffers.data(),
+        };
+        if (m_GraphicsQueue.submit(1, &submitInfo, vk::Fence(nullptr)) != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to submit copy command buffer!");
+        }
+
+        if (m_GraphicsQueue.waitIdle() != vk::Result::eSuccess) {
+            throw std::runtime_error("Wait idle failed!");
+        }
+
+        m_Device->freeCommandBuffers(m_CommandPool.get(), commandBuffers);
+    }
+
+    void CreateVertexBuffer() {
+        vk::DeviceSize bufferSize = sizeof(s_Vertices[0]) * s_Vertices.size();
+
+        vk::Buffer stagingBuffer;
+        vk::DeviceMemory stagingBufferMemory;
+        CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer, stagingBufferMemory);
 
         void* data;
-        if (m_Device->mapMemory(m_VertexBufferMemory.get(), vk::DeviceSize(0), 
-            bufferInfo.size, vk::MemoryMapFlags(0), &data) != vk::Result::eSuccess) {
+        if (m_Device->mapMemory(stagingBufferMemory, vk::DeviceSize(0), 
+            bufferSize, vk::MemoryMapFlags(0), &data) != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to map memory!");
         }
-        memcpy(data, s_Vertices.data(), (size_t)bufferInfo.size);
-        m_Device->unmapMemory(m_VertexBufferMemory.get());
+        memcpy(data, s_Vertices.data(), (size_t)bufferSize);
+        m_Device->unmapMemory(stagingBufferMemory);
+
+        CreateBufferUnique(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, m_VertexBuffer, m_VertexBufferMemory);
+
+        CopyBuffer(stagingBuffer, m_VertexBuffer.get(), bufferSize);
+
+        m_Device->destroyBuffer(stagingBuffer);
+        m_Device->freeMemory(stagingBufferMemory);
     }
 
     void CreateCommandBuffers(){
