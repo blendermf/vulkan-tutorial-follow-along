@@ -85,9 +85,14 @@ struct Vertex {
 };
 
 const std::vector<Vertex> s_Vertices = {
-    {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}},
+};
+
+struct std::vector<uint16_t> s_Indices = {
+    0, 1, 2, 2, 3, 0,
 };
 
 class HelloTriangleApplication {
@@ -122,6 +127,8 @@ private:
     size_t m_CurrentFrame = 0;
     vk::UniqueBuffer m_VertexBuffer;
     vk::UniqueDeviceMemory m_VertexBufferMemory;
+    vk::UniqueBuffer m_IndexBuffer;
+    vk::UniqueDeviceMemory m_IndexBufferMemory;
 
 public:
     void Run() {
@@ -176,6 +183,7 @@ private:
         CreateFramebuffers();
         CreateCommandPool();
         CreateVertexBuffer();
+        CreateIndexBuffer();
         CreateCommandBuffers();
         CreateSyncObjects();
     }
@@ -1018,8 +1026,22 @@ private:
         m_Device->freeCommandBuffers(m_CommandPool.get(), commandBuffers);
     }
 
-    void CreateVertexBuffer() {
-        vk::DeviceSize bufferSize = sizeof(s_Vertices[0]) * s_Vertices.size();
+    template<typename t>
+    void CreateVKBufferUnique(const std::vector<t>& data, vk::UniqueBuffer& buffer,
+                                vk::UniqueDeviceMemory& bufferMemory, vk::BufferUsageFlags usage)
+    {
+        vk::Buffer localBuffer;
+        vk::DeviceMemory localBufferMemory;
+        CreateVKBuffer<t>(data, localBuffer, localBufferMemory, usage);
+
+        buffer = vk::UniqueBuffer(localBuffer, m_Device.get());
+        bufferMemory = vk::UniqueDeviceMemory(localBufferMemory, m_Device.get());
+    }
+
+    template<typename t>
+    void CreateVKBuffer(const std::vector<t>& data, vk::Buffer& buffer,
+                        vk::DeviceMemory& bufferMemory, vk::BufferUsageFlags usage) {
+        vk::DeviceSize bufferSize = sizeof(data[0]) * data.size();
 
         vk::Buffer stagingBuffer;
         vk::DeviceMemory stagingBufferMemory;
@@ -1027,21 +1049,29 @@ private:
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
             stagingBuffer, stagingBufferMemory);
 
-        void* data;
+        void* memoryData;
         if (m_Device->mapMemory(stagingBufferMemory, vk::DeviceSize(0), 
-            bufferSize, vk::MemoryMapFlags(0), &data) != vk::Result::eSuccess) {
+            bufferSize, vk::MemoryMapFlags(0), &memoryData) != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to map memory!");
         }
-        memcpy(data, s_Vertices.data(), (size_t)bufferSize);
+        memcpy(memoryData, data.data(), (size_t)bufferSize);
         m_Device->unmapMemory(stagingBufferMemory);
 
-        CreateBufferUnique(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
-            vk::MemoryPropertyFlagBits::eDeviceLocal, m_VertexBuffer, m_VertexBufferMemory);
+        CreateBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | usage,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, buffer, bufferMemory);
 
-        CopyBuffer(stagingBuffer, m_VertexBuffer.get(), bufferSize);
+        CopyBuffer(stagingBuffer, buffer, bufferSize);
 
         m_Device->destroyBuffer(stagingBuffer);
         m_Device->freeMemory(stagingBufferMemory);
+    }
+
+    void CreateVertexBuffer() {
+        CreateVKBufferUnique<Vertex>(s_Vertices, m_VertexBuffer, m_VertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer);
+    }
+
+    void CreateIndexBuffer() {
+        CreateVKBufferUnique<uint16_t>(s_Indices, m_IndexBuffer, m_IndexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer);
     }
 
     void CreateCommandBuffers(){
@@ -1109,7 +1139,9 @@ private:
             vk::DeviceSize offsets[] = { 0 };
             m_CommandBuffers[i]->bindVertexBuffers(0, 1, vertexBuffers, offsets);
 
-            m_CommandBuffers[i]->draw(static_cast<uint32_t>(s_Vertices.size()), 1, 0, 0);
+            m_CommandBuffers[i]->bindIndexBuffer(m_IndexBuffer.get(), 0, vk::IndexType::eUint16);
+
+            m_CommandBuffers[i]->drawIndexed(static_cast<uint32_t>(s_Indices.size()), 1, 0, 0, 0);
 
             m_CommandBuffers[i]->endRenderPass();
 
