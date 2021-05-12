@@ -5,6 +5,9 @@
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 #include <vector>
 #include <iostream>
@@ -95,6 +98,12 @@ struct std::vector<uint16_t> s_Indices = {
     0, 1, 2, 2, 3, 0,
 };
 
+struct UniformBufferObject {
+    glm::mat4 Model;
+    glm::mat4 View;
+    glm::mat4 Projection;
+};
+
 class HelloTriangleApplication {
 public:
     bool m_FramebufferResized = false;
@@ -115,6 +124,7 @@ private:
     vk::Extent2D m_SwapChainExtent;
     std::vector<vk::UniqueImageView> m_SwapChainImageViews;
     vk::UniqueRenderPass m_RenderPass;
+    vk::UniqueDescriptorSetLayout m_DescriptorSetLayout;
     vk::UniquePipelineLayout m_PipelineLayout;
     vk::UniquePipeline m_GraphicsPipeline;
     std::vector<vk::UniqueFramebuffer> m_SwapChainFramebuffers;
@@ -129,6 +139,8 @@ private:
     vk::UniqueDeviceMemory m_VertexBufferMemory;
     vk::UniqueBuffer m_IndexBuffer;
     vk::UniqueDeviceMemory m_IndexBufferMemory;
+    std::vector<vk::UniqueBuffer> m_UniformBuffers;
+    std::vector<vk::UniqueDeviceMemory> m_UniformBuffersMemory;
 
 public:
     void Run() {
@@ -179,11 +191,13 @@ private:
         CreateSwapChain();
         CreateImageViews();
         CreateRenderPass();
+        CreateDescriptorSetLayout();
         CreateGraphicsPipeline();
         CreateFramebuffers();
         CreateCommandPool();
         CreateVertexBuffer();
         CreateIndexBuffer();
+        CreateUniformBuffers();
         CreateCommandBuffers();
         CreateSyncObjects();
     }
@@ -598,6 +612,9 @@ private:
         // Not sure why this is needed to prevent validation error / crashes, the next line calls the destroy function
         m_Device->destroySwapchainKHR(m_OldSwapChain.get());
         m_OldSwapChain.release();
+
+        m_UniformBuffers.clear();
+        m_UniformBuffersMemory.clear();
     }
 
     void RecreateSwapChain() {
@@ -619,6 +636,7 @@ private:
         CreateImageViews();
         CreateRenderPass();
         CreateFramebuffers();
+        CreateUniformBuffers();
         CreateCommandBuffers();
 
         m_ImagesInFlight.resize(m_SwapChainImages.size(), vk::Fence(nullptr));
@@ -725,6 +743,29 @@ private:
         return shaderModule;
     }
 
+    void CreateDescriptorSetLayout() {
+        vk::DescriptorSetLayoutBinding uboLayoutBinding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+        };
+
+        vk::DescriptorSetLayoutCreateInfo layoutInfo{
+            .sType = vk::StructureType::eDescriptorSetLayoutCreateInfo,
+            .bindingCount = 1,
+            .pBindings = &uboLayoutBinding,
+        };
+
+        auto [result, descriptorSetLayout] = m_Device->createDescriptorSetLayoutUnique(layoutInfo);
+
+        m_DescriptorSetLayout = std::move(descriptorSetLayout);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create descriptor set layout!");
+        }
+    }
+
     void CreateGraphicsPipeline() {
         auto vertShaderCode = ReadFile("shaders/shader.vert.spv");
         auto fragShaderCode = ReadFile("shaders/shader.frag.spv");
@@ -826,8 +867,8 @@ private:
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
             .sType = vk::StructureType::ePipelineLayoutCreateInfo,
-            .setLayoutCount = 0,
-            .pushConstantRangeCount = 0,
+            .setLayoutCount = 1,
+            .pSetLayouts = &m_DescriptorSetLayout.get(),
         };
 
         auto [result, pipelineLayout] = m_Device->createPipelineLayoutUnique(pipelineLayoutInfo);
@@ -1074,6 +1115,19 @@ private:
         CreateVKBufferUnique<uint16_t>(s_Indices, m_IndexBuffer, m_IndexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer);
     }
 
+    void CreateUniformBuffers() {
+        vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        m_UniformBuffers.resize(m_SwapChainImages.size());
+        m_UniformBuffersMemory.resize(m_SwapChainImages.size());
+
+        for (size_t i = 0; i < m_SwapChainImages.size(); i++) {
+            CreateBufferUnique(bufferSize, vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                m_UniformBuffers[i], m_UniformBuffersMemory[i]);
+        }
+    }
+
     void CreateCommandBuffers(){
         vk::CommandBufferAllocateInfo allocInfo{
             .sType = vk::StructureType::eCommandBufferAllocateInfo,
@@ -1186,6 +1240,28 @@ private:
         }
     }
 
+    void UpdateUniformBuffer(uint32_t currentImage) {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        UniformBufferObject ubo{
+            .Model = glm::rotate(glm::mat4(1.0f), time * glm::half_pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f)),
+            .View = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
+            .Projection = glm::perspective(glm::radians(45.0f), (float)m_SwapChainExtent.width / (float)m_SwapChainExtent.height, 0.1f, 10.0f),
+        };
+        ubo.Projection[1][1] *= -1.0f; // Y Flip (glm uses OpenGL coords)
+
+        void* data;
+        if (m_Device->mapMemory(m_UniformBuffersMemory[currentImage].get(), vk::DeviceSize(0), 
+            sizeof(ubo), vk::MemoryMapFlags(0), &data) != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to map memory!");
+        }
+        memcpy(data, &ubo, sizeof(ubo));
+        m_Device->unmapMemory(m_UniformBuffersMemory[currentImage].get());
+    }
+
     void DrawFrame() {
         if (m_Device->waitForFences(m_InFlightFences[m_CurrentFrame], VK_TRUE, UINT64_MAX) != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to wait for fence!");
@@ -1208,6 +1284,8 @@ private:
         }
 
         m_ImagesInFlight[imageIndex] = m_InFlightFences[m_CurrentFrame];
+
+        UpdateUniformBuffer(imageIndex);
 
         vk::Semaphore waitSemaphores[] = { m_ImageAvailableSemaphores[m_CurrentFrame].get() };
         vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
