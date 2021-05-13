@@ -4,6 +4,9 @@
 #define VULKAN_HPP_ASSERT 
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
+
+#define GLM_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_LEFT_HANDED
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -99,9 +102,9 @@ struct std::vector<uint16_t> s_Indices = {
 };
 
 struct UniformBufferObject {
-    glm::mat4 Model;
-    glm::mat4 View;
-    glm::mat4 Projection;
+    alignas(16) glm::mat4 Model;
+    alignas(16) glm::mat4 View;
+    alignas(16) glm::mat4 Projection;
 };
 
 class HelloTriangleApplication {
@@ -141,6 +144,9 @@ private:
     vk::UniqueDeviceMemory m_IndexBufferMemory;
     std::vector<vk::UniqueBuffer> m_UniformBuffers;
     std::vector<vk::UniqueDeviceMemory> m_UniformBuffersMemory;
+    vk::UniqueDescriptorPool m_DescriptorPool;
+    std::vector<vk::DescriptorSet> m_DescriptorSets; // Not using unique for now to avoid setting vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet
+    
 
 public:
     void Run() {
@@ -198,6 +204,8 @@ private:
         CreateVertexBuffer();
         CreateIndexBuffer();
         CreateUniformBuffers();
+        CreateDescriptorPool();
+        CreateDescriptorSets();
         CreateCommandBuffers();
         CreateSyncObjects();
     }
@@ -615,6 +623,8 @@ private:
 
         m_UniformBuffers.clear();
         m_UniformBuffersMemory.clear();
+
+        m_DescriptorPool.release();
     }
 
     void RecreateSwapChain() {
@@ -637,6 +647,8 @@ private:
         CreateRenderPass();
         CreateFramebuffers();
         CreateUniformBuffers();
+        CreateDescriptorPool();
+        CreateDescriptorSets();
         CreateCommandBuffers();
 
         m_ImagesInFlight.resize(m_SwapChainImages.size(), vk::Fence(nullptr));
@@ -1128,6 +1140,67 @@ private:
         }
     }
 
+    void CreateDescriptorPool() {
+        vk::DescriptorPoolSize poolSize{
+            .type = vk::DescriptorType::eUniformBuffer,
+            .descriptorCount = static_cast<uint32_t>(m_SwapChainImages.size()),
+        };
+
+        vk::DescriptorPoolCreateInfo poolInfo{
+            .sType = vk::StructureType::eDescriptorPoolCreateInfo,
+            .maxSets = static_cast<uint32_t>(m_SwapChainImages.size()),
+            .poolSizeCount = 1,
+            .pPoolSizes = &poolSize,
+        };
+
+        auto [result, descriptorPool] = m_Device->createDescriptorPoolUnique(poolInfo);
+
+        m_DescriptorPool = std::move(descriptorPool);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create descriptor pool!");
+        }
+    }
+
+    void CreateDescriptorSets() {
+        std::vector<vk::DescriptorSetLayout> layouts(m_SwapChainImages.size(), m_DescriptorSetLayout.get());
+
+        vk::DescriptorSetAllocateInfo allocInfo{
+            .sType = vk::StructureType::eDescriptorSetAllocateInfo,
+            .descriptorPool = m_DescriptorPool.get(),
+            .descriptorSetCount = static_cast<uint32_t>(m_SwapChainImages.size()),
+            .pSetLayouts = layouts.data(),
+        };
+
+        auto [result, descriptorSets] = m_Device->allocateDescriptorSets(allocInfo);
+
+        m_DescriptorSets = std::move(descriptorSets);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to allocate descriptor sets!");
+        }
+
+        for (size_t i = 0; i < m_SwapChainImages.size(); i++) {
+            vk::DescriptorBufferInfo bufferInfo{
+                .buffer = m_UniformBuffers[i].get(),
+                .offset = 0,
+                .range = sizeof(UniformBufferObject),
+            };
+
+            vk::WriteDescriptorSet descriptorWrite{
+                .sType = vk::StructureType::eWriteDescriptorSet,
+                .dstSet = m_DescriptorSets[i],
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &bufferInfo,
+            };
+
+            m_Device->updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
     void CreateCommandBuffers(){
         vk::CommandBufferAllocateInfo allocInfo{
             .sType = vk::StructureType::eCommandBufferAllocateInfo,
@@ -1194,6 +1267,8 @@ private:
             m_CommandBuffers[i]->bindVertexBuffers(0, 1, vertexBuffers, offsets);
 
             m_CommandBuffers[i]->bindIndexBuffer(m_IndexBuffer.get(), 0, vk::IndexType::eUint16);
+
+            m_CommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout.get(), 0, 1, &m_DescriptorSets[i], 0, nullptr);
 
             m_CommandBuffers[i]->drawIndexed(static_cast<uint32_t>(s_Indices.size()), 1, 0, 0, 0);
 
