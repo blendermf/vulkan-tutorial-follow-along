@@ -132,7 +132,7 @@ private:
     vk::UniqueSurfaceKHR m_Surface;
     vk::UniqueSwapchainKHR m_OldSwapChain;
     vk::UniqueSwapchainKHR m_SwapChain;
-    std::vector<vk::Image> m_SwapChainImages;
+    std::vector<vk::Image> m_SwapChainImages; // Presentable, do not make unique, as they are destroyed by the swap chain
     vk::Format m_SwapChainImageFormat;
     vk::Extent2D m_SwapChainExtent;
     std::vector<vk::UniqueImageView> m_SwapChainImageViews;
@@ -160,6 +160,8 @@ private:
     vk::UniqueDeviceMemory m_StagingBufferMemory;
     vk::UniqueImage m_TextureImage;
     vk::UniqueDeviceMemory m_TextureImageMemory;
+    vk::UniqueImageView m_TextureImageView;
+    vk::UniqueSampler m_TextureSampler;
 
 public:
     void Run() {
@@ -215,6 +217,8 @@ private:
         CreateFramebuffers();
         CreateCommandPool();
         CreateTextureImage();
+        CreateTextureImageView();
+        CreateTextureSampler();
         CreateVertexBuffer();
         CreateIndexBuffer();
         CreateUniformBuffers();
@@ -377,6 +381,9 @@ private:
 
     bool IsDeviceSuitable(vk::PhysicalDevice device) {
         QueueFamilyIndices indices = FindQueueFamilies(device);
+
+        vk::PhysicalDeviceFeatures supportedFeatures = device.getFeatures();
+
         bool extensionsSupported = CheckDeviceExtensionSupport(device);
         bool swapChainAdequate = false;
 
@@ -385,7 +392,7 @@ private:
             swapChainAdequate = !swapChainSupport.Formats.empty() && !swapChainSupport.PresentModes.empty();
         }
 
-        return indices.IsComplete() && extensionsSupported && swapChainAdequate;
+        return indices.IsComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
     }
 
     void PickPhysicalDevice() {
@@ -463,7 +470,9 @@ private:
             });
         }
         
-        vk::PhysicalDeviceFeatures deviceFeatures{};
+        vk::PhysicalDeviceFeatures deviceFeatures{
+            .samplerAnisotropy = VK_TRUE,
+        };
 
         vk::DeviceCreateInfo createInfo{
             .sType = vk::StructureType::eDeviceCreateInfo,
@@ -615,7 +624,7 @@ private:
 
         auto [swapChainImagesResult, swapChainImages] = m_Device->getSwapchainImagesKHR(m_SwapChain.get());
 
-        m_SwapChainImages = std::move(swapChainImages);
+        m_SwapChainImages = swapChainImages;
 
         if (swapChainImagesResult != vk::Result::eSuccess) {
             throw std::runtime_error("Failed to get swapchain images!");
@@ -672,33 +681,7 @@ private:
         m_SwapChainImageViews.resize(m_SwapChainImages.size());
 
         for (size_t i = 0; i < m_SwapChainImages.size(); i++) {
-            vk::ImageViewCreateInfo createInfo{
-                .sType = vk::StructureType::eImageViewCreateInfo,
-                .image = m_SwapChainImages[i],
-                .viewType = vk::ImageViewType::e2D,
-                .format = m_SwapChainImageFormat,
-                .components = {
-                    .r = vk::ComponentSwizzle::eIdentity,
-                    .g = vk::ComponentSwizzle::eIdentity,
-                    .b = vk::ComponentSwizzle::eIdentity,
-                    .a = vk::ComponentSwizzle::eIdentity,
-                },
-                .subresourceRange = {
-                    .aspectMask = vk::ImageAspectFlagBits::eColor,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1,
-                },
-            };
-
-            auto [result, imageView] = m_Device->createImageViewUnique(createInfo);
-
-            m_SwapChainImageViews[i] = std::move(imageView);
-
-            if (result != vk::Result::eSuccess) {
-                throw std::runtime_error("Failed to create image views!");
-            }
+            m_SwapChainImageViews[i] = CreateImageViewUnique(m_SwapChainImages[i], m_SwapChainImageFormat);
         }
     }
 
@@ -1151,6 +1134,70 @@ private:
 
         EndSingleTimeCommands(commandBuffer);
     }
+
+    vk::UniqueImageView CreateImageViewUnique(vk::Image& image, vk::Format format) {
+        return vk::UniqueImageView(CreateImageView(image, format), m_Device.get());
+    }
+
+    vk::ImageView CreateImageView(vk::Image& image, vk::Format format) {
+        vk::ImageViewCreateInfo viewInfo{
+            .sType = vk::StructureType::eImageViewCreateInfo,
+            .image = image,
+            .viewType = vk::ImageViewType::e2D,
+            .format = format,
+            .subresourceRange = {
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+        },
+        };
+
+        auto [imageViewResult, imageView] = m_Device->createImageView(viewInfo);
+
+        if (imageViewResult != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create texture image view!");
+        }
+
+        return imageView;
+    }
+
+    void CreateTextureImageView() {
+        m_TextureImageView = CreateImageViewUnique(m_TextureImage.get(), vk::Format::eR8G8B8A8Srgb);
+    }
+
+    void CreateTextureSampler() {
+        vk::PhysicalDeviceProperties properties = m_PhysicalDevice.getProperties();
+
+        vk::SamplerCreateInfo samplerInfo{
+            .sType = vk::StructureType::eSamplerCreateInfo,
+            .magFilter = vk::Filter::eLinear,
+            .minFilter = vk::Filter::eLinear,
+            .mipmapMode = vk::SamplerMipmapMode::eLinear,
+            .addressModeU = vk::SamplerAddressMode::eRepeat,
+            .addressModeV = vk::SamplerAddressMode::eRepeat,
+            .addressModeW = vk::SamplerAddressMode::eRepeat,
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = VK_TRUE,
+            .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+            .compareEnable = VK_FALSE,
+            .compareOp = vk::CompareOp::eAlways,
+            .minLod = 0.0f,
+            .maxLod = 0.0f,
+            .borderColor = vk::BorderColor::eIntOpaqueBlack,
+            .unnormalizedCoordinates = VK_FALSE,
+        };
+
+        auto [result, textureSampler] = m_Device->createSamplerUnique(samplerInfo);
+
+        m_TextureSampler = std::move(textureSampler);
+
+        if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("Failed to create texture samler!");
+        }
+    }
+
 
     uint32_t FindMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
         vk::PhysicalDeviceMemoryProperties memProperties = m_PhysicalDevice.getMemoryProperties();
