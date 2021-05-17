@@ -23,15 +23,11 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
     <None Include="shaders\shader.vert">
       <Filter>Source Files\Shaders</Filter>
     </None>
     <None Include="shaders\shader.frag">
       <Filter>Source Files\Shaders</Filter>
     </None>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="shaders\shader.frag" />
   </ItemGroup>
 </Project>

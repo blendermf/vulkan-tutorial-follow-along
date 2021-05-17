@@ -362,3 +362,4 @@ MigrationBackup/
 FodyWeavers.xsd
 
 VulkanApp/packages.config
+vcpkg_installed
