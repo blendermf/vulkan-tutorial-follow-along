@@ -94,7 +94,8 @@
       </Command>
     </PostBuildEvent>
     <PreBuildEvent>
-      <Command>xcopy "$(ProjectDir)textures\" "$(TargetDir)\textures" /s /i /y</Command>
+      <Command>xcopy "$(ProjectDir)textures\" "$(TargetDir)textures" /s /i /y
+xcopy "$(ProjectDir)models\" "$(TargetDir)models" /s /i /y</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -109,6 +110,9 @@
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>%VULKAN_SDK%\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -120,7 +124,8 @@
       <IgnoreSpecificDefaultLibraries>vulkan-1.dll;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
     </Link>
     <PreBuildEvent>
-      <Command>xcopy "$(ProjectDir)textures\" "$(TargetDir)\textures" /s /i /y</Command>
+      <Command>xcopy "$(ProjectDir)textures\" "$(TargetDir)textures" /s /i /y
+xcopy "$(ProjectDir)models\" "$(TargetDir)models" /s /i /y</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>

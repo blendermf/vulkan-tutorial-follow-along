@@ -14,9 +14,12 @@
 #define GLM_FORCE_LEFT_HANDED
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
+#include <glm/gtx/hash.hpp>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 #pragma clang diagnostic pop
 
@@ -31,11 +34,15 @@
 #include <cstdint> // Necessary for UINT32_MAX
 #include <algorithm> // Necessary for std::min/std::max
 #include <fstream>
+#include <compare>
 
 const int s_MaxFramesInFlight = 2;
 
 const uint32_t s_Width = 1280;
 const uint32_t s_Height = 720;
+
+const std::string s_ModelPath = "models/viking_room.obj";
+const std::string s_TexturePath = "textures/viking_room.png";
 
 const std::vector<const char*> s_ValidationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -73,6 +80,8 @@ struct Vertex {
     glm::vec3 Color;
     glm::vec2 TexCoord;
 
+    bool operator==(const Vertex&) const = default;
+
     static vk::VertexInputBindingDescription GetBindingDescription() {
         vk::VertexInputBindingDescription bindingDescription{
             .binding = 0,
@@ -107,22 +116,15 @@ struct Vertex {
     }
 };
 
-const std::vector<Vertex> s_Vertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-
-	{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-	{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-	{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-	{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-};
-
-struct std::vector<uint16_t> s_Indices = {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4,
-};
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(Vertex const& vertex) const {
+            return ((hash<glm::vec3>()(vertex.Position) ^
+                (hash<glm::vec3>()(vertex.Color) << 1)) >> 1) ^
+                (hash<glm::vec2>()(vertex.TexCoord) << 1);
+        }
+    };
+}
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 Model;
@@ -161,6 +163,8 @@ private:
     std::vector<vk::Fence> m_InFlightFences;
     std::vector<vk::Fence> m_ImagesInFlight;
     size_t m_CurrentFrame = 0;
+    std::vector<Vertex> m_Vertices;
+    std::vector<uint32_t> m_Indices;
     vk::UniqueBuffer m_VertexBuffer;
     vk::UniqueDeviceMemory m_VertexBufferMemory;
     vk::UniqueBuffer m_IndexBuffer;
@@ -236,6 +240,7 @@ private:
         CreateTextureImage();
         CreateTextureImageView();
         CreateTextureSampler();
+        LoadModel();
         CreateVertexBuffer();
         CreateIndexBuffer();
         CreateUniformBuffers();
@@ -1127,7 +1132,7 @@ private:
 
     void CreateTextureImage() {
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load(s_TexturePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         vk::DeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
@@ -1311,6 +1316,43 @@ private:
         throw std::runtime_error("Failed to find suitable memory type!");
     }
 
+    void LoadModel() {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, s_ModelPath.c_str())) {
+            throw std::runtime_error(warn + err);
+        }
+
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                Vertex vertex{
+                    .Position = {
+                        attrib.vertices[3 * index.vertex_index + 0],
+                        attrib.vertices[3 * index.vertex_index + 1],
+                        attrib.vertices[3 * index.vertex_index + 2],
+                    },
+                    .Color = { 1.0f, 1.0f, 1.0f },
+                    .TexCoord = {
+                        attrib.texcoords[2 * index.texcoord_index + 0],
+                        1.0f - attrib.texcoords[2 * index.texcoord_index + 1],
+                    },
+                };
+
+                if (uniqueVertices.count(vertex) == 0) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(m_Vertices.size());
+                    m_Vertices.push_back(vertex);
+                }
+
+                m_Indices.push_back(uniqueVertices[vertex]);
+            }
+        }
+    }
+
     void CreateBufferUnique(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties,
                         vk::UniqueBuffer& buffer, vk::UniqueDeviceMemory& bufferMemory) {
         vk::Buffer localBuffer;
@@ -1415,11 +1457,11 @@ private:
     }
 
     void CreateVertexBuffer() {
-        CreateVKBufferUnique<Vertex>(s_Vertices, m_VertexBuffer, m_VertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer);
+        CreateVKBufferUnique<Vertex>(m_Vertices, m_VertexBuffer, m_VertexBufferMemory, vk::BufferUsageFlagBits::eVertexBuffer);
     }
 
     void CreateIndexBuffer() {
-        CreateVKBufferUnique<uint16_t>(s_Indices, m_IndexBuffer, m_IndexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer);
+        CreateVKBufferUnique<uint32_t>(m_Indices, m_IndexBuffer, m_IndexBufferMemory, vk::BufferUsageFlagBits::eIndexBuffer);
     }
 
     void CreateUniformBuffers() {
@@ -1585,11 +1627,11 @@ private:
             vk::DeviceSize offsets[] = { 0 };
             m_CommandBuffers[i]->bindVertexBuffers(0, 1, vertexBuffers, offsets);
 
-            m_CommandBuffers[i]->bindIndexBuffer(m_IndexBuffer.get(), 0, vk::IndexType::eUint16);
+            m_CommandBuffers[i]->bindIndexBuffer(m_IndexBuffer.get(), 0, vk::IndexType::eUint32);
 
             m_CommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_PipelineLayout.get(), 0, 1, &m_DescriptorSets[i], 0, nullptr);
 
-            m_CommandBuffers[i]->drawIndexed(static_cast<uint32_t>(s_Indices.size()), 1, 0, 0, 0);
+            m_CommandBuffers[i]->drawIndexed(static_cast<uint32_t>(m_Indices.size()), 1, 0, 0, 0);
 
             m_CommandBuffers[i]->endRenderPass();
 
