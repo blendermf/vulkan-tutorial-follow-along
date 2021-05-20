@@ -36,6 +36,8 @@
 #include <fstream>
 #include <compare>
 
+#define FULLSCREEN 0
+
 const int s_MaxFramesInFlight = 2;
 
 const uint32_t s_Width = 1280;
@@ -221,8 +223,14 @@ private:
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-        m_Window = glfwCreateWindow(s_Width, s_Height, "Vulkan", nullptr, nullptr);
+#if FULLSCREEN
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
 
+        m_Window = glfwCreateWindow(mode->width, mode->height, "Vulkan", monitor, nullptr);
+#else
+        m_Window = glfwCreateWindow(s_Width, s_Height, "Vulkan", nullptr, nullptr);
+#endif
         glfwSetWindowUserPointer(m_Window, this);
         glfwSetFramebufferSizeCallback(m_Window, FramebufferResizeCallback);
     }
