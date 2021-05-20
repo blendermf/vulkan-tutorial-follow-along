@@ -709,7 +709,7 @@ private:
         m_SwapChainImageViews.resize(m_SwapChainImages.size());
 
         for (size_t i = 0; i < m_SwapChainImages.size(); i++) {
-            m_SwapChainImageViews[i] = CreateImageViewUnique(m_SwapChainImages[i], m_SwapChainImageFormat, vk::ImageAspectFlagBits::eColor, m_MipLevels);
+            m_SwapChainImageViews[i] = CreateImageViewUnique(m_SwapChainImages[i], m_SwapChainImageFormat, vk::ImageAspectFlagBits::eColor, 1);
         }
     }
 
@@ -1125,9 +1125,9 @@ private:
         m_DepthImagesMemory.resize(m_SwapChainImages.size());
 
         for (size_t i = 0; i < m_SwapChainImages.size(); i++) {
-            CreateImageUnique(m_SwapChainExtent.width, m_SwapChainExtent.height, m_MipLevels, depthFormat, vk::ImageTiling::eOptimal,
+            CreateImageUnique(m_SwapChainExtent.width, m_SwapChainExtent.height, 1, depthFormat, vk::ImageTiling::eOptimal,
                 vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, m_DepthImages[i], m_DepthImagesMemory[i]);
-            m_DepthImageViews[i] = CreateImageViewUnique(m_DepthImages[i].get(), depthFormat, vk::ImageAspectFlagBits::eDepth, m_MipLevels);
+            m_DepthImageViews[i] = CreateImageViewUnique(m_DepthImages[i].get(), depthFormat, vk::ImageAspectFlagBits::eDepth, 1);
         }
     }
 
